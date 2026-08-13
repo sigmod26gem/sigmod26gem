@@ -15,6 +15,89 @@ typedef unsigned int tableint;
 typedef unsigned int linklistsizeint;
 
 
+// Drop-in replacement for the `std::unordered_map<tableint, tableint>` that used
+// to back `entry_map`. The keys are always internal element ids in
+// [0, max_elements_), so we store membership/value in a pre-sized array indexed
+// by the key instead of a hash table. This removes the rehash that happened on
+// concurrent `entry_map[cur_c] = ...` inserts during parallel cluster
+// construction, which corrupted the heap ("double free or corruption").
+//
+// Membership is tracked with a generation stamp so that clear() is O(1):
+// bumping the generation logically empties the container without touching the
+// backing arrays. Concurrent writes target distinct keys (each insertion owns a
+// unique cur_c), and membership reads only load the per-key atomic generation,
+// so the build-time access pattern is data-race free.
+class ClusterEntryMap {
+ public:
+    struct const_iterator {
+        bool present;
+        bool operator==(const const_iterator& o) const { return present == o.present; }
+        bool operator!=(const const_iterator& o) const { return present != o.present; }
+    };
+
+    class reference {
+     public:
+        reference(ClusterEntryMap* m, tableint k) : m_(m), k_(k) {}
+        operator tableint() const { return m_->get(k_); }
+        reference& operator=(tableint v) {
+            m_->set(k_, v);
+            return *this;
+        }
+
+     private:
+        ClusterEntryMap* m_;
+        tableint k_;
+    };
+
+    void resize(size_t n) {
+        gen_ = std::unique_ptr<std::atomic<uint32_t>[]>(new std::atomic<uint32_t>[n]);
+        val_ = std::unique_ptr<tableint[]>(new tableint[n]);
+        for (size_t i = 0; i < n; i++) gen_[i].store(0, std::memory_order_relaxed);
+        cap_ = n;
+        cur_gen_ = 1;
+        count_.store(0, std::memory_order_relaxed);
+    }
+
+    // O(1) logical clear via generation bump.
+    void clear() {
+        if (++cur_gen_ == 0) {  // generation wrap-around: hard reset
+            for (size_t i = 0; i < cap_; i++) gen_[i].store(0, std::memory_order_relaxed);
+            cur_gen_ = 1;
+        }
+        count_.store(0, std::memory_order_relaxed);
+    }
+
+    bool contains(tableint k) const {
+        return k < cap_ && gen_[k].load(std::memory_order_acquire) == cur_gen_;
+    }
+
+    const_iterator find(tableint k) const { return const_iterator{contains(k)}; }
+    const_iterator end() const { return const_iterator{false}; }
+
+    reference operator[](tableint k) { return reference(this, k); }
+
+    size_t size() const { return count_.load(std::memory_order_relaxed); }
+
+ private:
+    void set(tableint k, tableint v) {
+        if (gen_[k].load(std::memory_order_relaxed) != cur_gen_)
+            count_.fetch_add(1, std::memory_order_relaxed);
+        val_[k] = v;
+        gen_[k].store(cur_gen_, std::memory_order_release);
+    }
+
+    tableint get(tableint k) const {
+        return contains(k) ? val_[k] : static_cast<tableint>(0);
+    }
+
+    std::unique_ptr<std::atomic<uint32_t>[]> gen_;
+    std::unique_ptr<tableint[]> val_;
+    size_t cap_{0};
+    uint32_t cur_gen_{1};
+    std::atomic<size_t> count_{0};
+};
+
+
 std::mutex cout_mutex;
 
 template<typename dist_t>
@@ -81,7 +164,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
 
     mutable std::mutex label_lookup_lock;  // lock for label_lookup_
     std::unordered_map<labeltype, tableint> label_lookup_;
-    std::unordered_map<tableint, tableint> entry_map;
+    ClusterEntryMap entry_map;
     std::vector<bool>search_set;
 
     std::default_random_engine level_generator_;
@@ -168,6 +251,8 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             throw std::runtime_error("Not enough memory");
 
         cur_element_count = 0;
+
+        entry_map.resize(max_elements_);
 
         visited_list_pool_ = std::unique_ptr<VisitedListPool>(new VisitedListPool(1, max_elements));
 
@@ -3392,6 +3477,7 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
+        entry_map.resize(max_elements);
         revSize_ = 1.0 / mult_;
         ef_ = 80;
         for (size_t i = 0; i < cur_element_count; i++) {
@@ -3667,47 +3753,47 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
     }
 
     // new pipeline for para
-    bool addPointMem(const void *data_point, labeltype label, labeltype entry) {
-        tableint cur_c = 0;
-        bool new_point = true;
-        {
-            // Checking if the element with the same label already exists
-            // if so, updating it *instead* of creating a new element.
-            std::unique_lock <std::mutex> lock_table(label_lookup_lock);
-            auto search = label_lookup_.find(label);
-            if (search != label_lookup_.end()) {
-                tableint existingInternalId = search->second;
-                cur_c = existingInternalId;
-                lock_table.unlock();
-                new_point = false;
-                // std::cout << label << " " << cur_c << " " << entry << " ? " << std::flush; 
-            }
-            else {
-                if (cur_element_count >= max_elements_) {
-                    throw std::runtime_error("The number of elements exceeds the specified limit");
-                }
-                cur_c = cur_element_count;
-                cur_element_count++;
-                label_lookup_[label] = cur_c;
-                // std::cout << label << " " << cur_c << " " << entry << " new " << std::flush;
-            }
-        }
-        tableint enterpoint_copy = 0;
-        if (label == entry) {
-            enterpoint_copy = cur_c;
-        } else {
-            enterpoint_copy = label_lookup_[entry];
-        }
-        entry_map[cur_c] = enterpoint_copy;
-        if (new_point) {
-            int curlevel = getRandomLevel(mult_);
-            element_levels_[cur_c] = curlevel;
-            memset(data_level0_memory_ + cur_c * size_data_per_element_ + offsetLevel0_, 0, size_data_per_element_);
-            memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
-            memcpy(getDataByInternalId(cur_c), data_point, data_size_);
-        }
-        return new_point;
-    }
+    // bool addPointMem(const void *data_point, labeltype label, labeltype entry) {
+    //     tableint cur_c = 0;
+    //     bool new_point = true;
+    //     {
+    //         // Checking if the element with the same label already exists
+    //         // if so, updating it *instead* of creating a new element.
+    //         std::unique_lock <std::mutex> lock_table(label_lookup_lock);
+    //         auto search = label_lookup_.find(label);
+    //         if (search != label_lookup_.end()) {
+    //             tableint existingInternalId = search->second;
+    //             cur_c = existingInternalId;
+    //             lock_table.unlock();
+    //             new_point = false;
+    //             // std::cout << label << " " << cur_c << " " << entry << " ? " << std::flush; 
+    //         }
+    //         else {
+    //             if (cur_element_count >= max_elements_) {
+    //                 throw std::runtime_error("The number of elements exceeds the specified limit");
+    //             }
+    //             cur_c = cur_element_count;
+    //             cur_element_count++;
+    //             label_lookup_[label] = cur_c;
+    //             // std::cout << label << " " << cur_c << " " << entry << " new " << std::flush;
+    //         }
+    //     }
+    //     tableint enterpoint_copy = 0;
+    //     if (label == entry) {
+    //         enterpoint_copy = cur_c;
+    //     } else {
+    //         enterpoint_copy = label_lookup_[entry];
+    //     }
+    //     entry_map[cur_c] = enterpoint_copy;
+    //     if (new_point) {
+    //         int curlevel = getRandomLevel(mult_);
+    //         element_levels_[cur_c] = curlevel;
+    //         memset(data_level0_memory_ + cur_c * size_data_per_element_ + offsetLevel0_, 0, size_data_per_element_);
+    //         memcpy(getExternalLabeLp(cur_c), &label, sizeof(labeltype));
+    //         memcpy(getDataByInternalId(cur_c), data_point, data_size_);
+    //     }
+    //     return new_point;
+    // }
 
     bool updateOldPointClusterEntry(const void *data_point, const float *cluster_distance, labeltype label, labeltype entry) {
         tableint cur_c = label_lookup_[label];
@@ -5141,34 +5227,34 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         std::cout << add_count << std::endl;
     }
 
-    std::vector<std::pair<tableint, int>> searchNodes(labeltype entry, int cid) {
-        tableint epid = label_lookup_[entry];
-        std::vector<std::pair<tableint, int>> queue;
-        int l = 0;
-        int r = 1;
-        int count = 0;
-        queue.push_back(std::make_pair(epid, 0));
-        entry_map[epid] = cid + 1;
-        while (l < r) {
-            tableint topnode = queue[l].first;
-            int curhop = queue[l].second;
-            l++;
-            linklistsizeint *ll_cur = get_linklist_at_level(topnode, 0);
-            int size = getListCount(ll_cur);
-            tableint *data = (tableint *) (ll_cur + 1);
-            // std::cout << getExternalLabel(topnode) << " " << size << std::endl;
-            for (int j = 0; j < size; j++) {
-                tableint nei_c = data[j];
-                // std::cout << getExternalLabel(nei_c) << " ";
-                if (entry_map.find(nei_c) != entry_map.end() && entry_map[nei_c] != cid + 1) {
-                    entry_map[nei_c] = cid + 1;
-                    queue.push_back(std::make_pair(nei_c, curhop + 1));
-                    r++;
-                }
-            }
-        }
-        return queue;
-    }
+    // std::vector<std::pair<tableint, int>> searchNodes(labeltype entry, int cid) {
+    //     tableint epid = label_lookup_[entry];
+    //     std::vector<std::pair<tableint, int>> queue;
+    //     int l = 0;
+    //     int r = 1;
+    //     int count = 0;
+    //     queue.push_back(std::make_pair(epid, 0));
+    //     entry_map[epid] = cid + 1;
+    //     while (l < r) {
+    //         tableint topnode = queue[l].first;
+    //         int curhop = queue[l].second;
+    //         l++;
+    //         linklistsizeint *ll_cur = get_linklist_at_level(topnode, 0);
+    //         int size = getListCount(ll_cur);
+    //         tableint *data = (tableint *) (ll_cur + 1);
+    //         // std::cout << getExternalLabel(topnode) << " " << size << std::endl;
+    //         for (int j = 0; j < size; j++) {
+    //             tableint nei_c = data[j];
+    //             // std::cout << getExternalLabel(nei_c) << " ";
+    //             if (entry_map.find(nei_c) != entry_map.end() && entry_map[nei_c] != cid + 1) {
+    //                 entry_map[nei_c] = cid + 1;
+    //                 queue.push_back(std::make_pair(nei_c, curhop + 1));
+    //                 r++;
+    //             }
+    //         }
+    //     }
+    //     return queue;
+    // }
 
 
     std::vector<std::pair<tableint, int>> searchNodesForFix(labeltype entry, int cid) {
@@ -5202,33 +5288,33 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
     }
 
 
-    std::vector<std::pair<tableint, int>> searchNodesWithHop(labeltype entry, int entry_layer, int cid) {
-        tableint epid = label_lookup_[entry];
-        std::vector<std::pair<tableint, int>> queue;
-        int l = 0;
-        int r = 1;
-        int count = 0;
-        queue.push_back(std::make_pair(epid, entry_layer));
-        entry_map[epid] = cid + 1;
-        while (l < r) {
-            tableint topnode = queue[l].first;
-            int curhop = queue[l].second;
-            linklistsizeint *ll_cur = get_linklist_at_level(topnode, 0);
-            int size = getListCount(ll_cur);
-            tableint *data = (tableint *) (ll_cur + 1);
-            // std::cout << getExternalLabel(topnode) << " " << size << std::endl;
-            for (int j = 0; j < size; j++) {
-                tableint nei_c = data[j];
-                // std::cout << getExternalLabel(nei_c) << " ";
-                if (entry_map.find(nei_c) != entry_map.end() && entry_map[nei_c] != cid + 1) {
-                    entry_map[nei_c] = cid + 1;
-                    queue.push_back(std::make_pair(nei_c, curhop + 1));
-                    r++;
-                }
-            }
-            l++;
-        }
-        return queue;
-    }
+    // std::vector<std::pair<tableint, int>> searchNodesWithHop(labeltype entry, int entry_layer, int cid) {
+    //     tableint epid = label_lookup_[entry];
+    //     std::vector<std::pair<tableint, int>> queue;
+    //     int l = 0;
+    //     int r = 1;
+    //     int count = 0;
+    //     queue.push_back(std::make_pair(epid, entry_layer));
+    //     entry_map[epid] = cid + 1;
+    //     while (l < r) {
+    //         tableint topnode = queue[l].first;
+    //         int curhop = queue[l].second;
+    //         linklistsizeint *ll_cur = get_linklist_at_level(topnode, 0);
+    //         int size = getListCount(ll_cur);
+    //         tableint *data = (tableint *) (ll_cur + 1);
+    //         // std::cout << getExternalLabel(topnode) << " " << size << std::endl;
+    //         for (int j = 0; j < size; j++) {
+    //             tableint nei_c = data[j];
+    //             // std::cout << getExternalLabel(nei_c) << " ";
+    //             if (entry_map.find(nei_c) != entry_map.end() && entry_map[nei_c] != cid + 1) {
+    //                 entry_map[nei_c] = cid + 1;
+    //                 queue.push_back(std::make_pair(nei_c, curhop + 1));
+    //                 r++;
+    //             }
+    //         }
+    //         l++;
+    //     }
+    //     return queue;
+    // }
 };
 }  // namespace hnswlib

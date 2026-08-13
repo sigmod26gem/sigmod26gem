@@ -77,7 +77,7 @@ int rerankK = 512;
 // std::vector<int>eflist = {1000};
 // std::vector<int>eflist = {10, 32, 64, 100, 200, 400, 800, 2000, 4000, 8000, 10000, 15000, 20000, 30000};
 // std::vector<int>eflist = {100, 256, 512, 1000, 2000, 4000, 80000, 16000, 24000, 32000};
-std::vector<int>eflist = {4000};
+std::vector<int>eflist = {2000, 4000};
 // 100
 // std::vector<int>eflist = {10, 32, 100, 200, 400, 800, 1000, 2000, 4000, 8000, 16000, 24000, 40000, 50000};
 // std::vector<int>eflist = {80000, 120000, 150000, 200000};
@@ -920,8 +920,8 @@ void load_msmarco_train_query(std::vector<float>& query_data, std::vector<vector
                       std::vector<std::vector<int>>& qrels) {
     long long offset = 0;  
     long long all_elements = 0;   
-    std::string qembfile_name = "/home/zhoujin/data/train_query.npy";
-    std::string qrelfile_name = "/home/zhoujin/data/qrels.train.select.reorder.tsv";    
+    std::string qembfile_name = dataset_path + "tmp/train_query.npy";
+    std::string qrelfile_name = dataset_path + "tmp/qrels.train.select.reorder.tsv";    
 
     cnpy::NpyArray qembs_npy = cnpy::npy_load(qembfile_name);
 
@@ -960,7 +960,7 @@ void load_msmarco_train_query(std::vector<float>& query_data, std::vector<vector
 }
 
 void load_msmarco_train_addedge(std::vector<std::pair<int, int>>& edge_pair) {
-    std::string edgefile_name = "/home/zhoujin/project/forremove/VecSetSearch/hnswlib/examples/msmarco_add_edge_100k_top5.txt";    
+    std::string edgefile_name = dataset_path + "tmp/add_edge_100k_top5.txt";    
     std::ifstream file(edgefile_name);
     std::string line;
     while (std::getline(file, line)) { // 逐行读取
@@ -1061,7 +1061,7 @@ int main() {
     std::vector<std::vector<int>> train_qrels;
 
     train_query_data.resize((long long) 808731 * 128 * 32);
-    load_msmarco_train_query(train_query_data, train_query, train_qrels);
+    // load_msmarco_train_query(train_query_data, train_query, train_qrels);
 
     bool rebuild = false;
     bool save_result = false;
@@ -1175,7 +1175,7 @@ int main() {
     }
 
 
-    std::vector<int> reranklist = {128, 256, 378, 512};
+    std::vector<int> reranklist = {256, 512};
     for (int r: reranklist) {
         rerankK = r;
         for (int tmpef: eflist) {
