@@ -1,4 +1,4 @@
-#include "search/kernels.h"
+#include "kernels.h"
 #include "EMD.h"
 #include <algorithm>
 #include <stdexcept>

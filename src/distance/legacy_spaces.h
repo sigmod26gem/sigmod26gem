@@ -1,6 +1,6 @@
 #pragma once
-#include "hnswlib.h"
-#include "vectorset.h"
+#include "graph/hnswlib.h"
+#include "graph/vectorset.h"
 #include<algorithm>
 #include <vector>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <Eigen/Dense>
 #include <cassert>
 #include <cblas.h>
-#include "../otlib/EMD.h"
+#include "distance/otlib/EMD.h"
 #include <chrono>
 
 constexpr int NUM_CLUSTER_CALC = 262144;
@@ -780,7 +780,7 @@ static float L2SqrVecCF(const vectorset* q, const vectorset* p, int level) {
     return sum1;
 }
 
-float max_inner_product_sum(const float* A, const float* B, int n, int m, int d) {
+inline float max_inner_product_sum(const float* A, const float* B, int n, int m, int d) {
     // **使用 Eigen::Map<> 映射 A 和 B，不复制数据**
     // Eigen::Map<const Eigen::MatrixXf> A_mat(A, n, d);
     // Eigen::Map<const Eigen::MatrixXf> B_mat(B, m, d);
@@ -796,7 +796,7 @@ static float L2SqrVecEigenCF(const vectorset* q, const vectorset* p, int level) 
 }
 
 
-void fast_dot_product_blas(int n, int d, int m, float* A, float* B, float* C) {
+inline void fast_dot_product_blas(int n, int d, int m, float* A, float* B, float* C) {
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
                 n, m, d,
                 1.0f, A, d,
@@ -890,7 +890,7 @@ static float L2SqrVecBlasDistance(const vectorset* q, const vectorset* p, float*
 //     return dist;
 // }
 
-float hungarian_algorithm(const std::vector<std::vector<float>>& cost) {
+inline float hungarian_algorithm(const std::vector<std::vector<float>>& cost) {
     size_t n = cost.size();
     size_t m = cost[0].size();
 
@@ -1087,7 +1087,7 @@ static float L2SqrVecClusterChamfer(const vectorset* q, const vectorset* p, cons
     return sum1 / n;
 }
 
-float compute_emd(const std::vector<float>& a, const std::vector<float>& b, 
+inline float compute_emd(const std::vector<float>& a, const std::vector<float>& b,
                   const std::vector<float>& C, int n, int m) {
     std::vector<float> F(n * m, 0);  // 传输矩阵
     cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans,
@@ -1180,7 +1180,7 @@ static float L2SqrVecSet(const vectorset* q, const vectorset* p, int level) {
     return sum1 / q_vecnum;
 }
 
-float compute_with_eigen(const float* data, const int* codes, int n, int d, int m) {
+inline float compute_with_eigen(const float* data, const int* codes, int n, int d, int m) {
     Eigen::Map<const Eigen::MatrixXf> data_mat(data, n, d);
     Eigen::VectorXf maxDist = Eigen::VectorXf::Constant(n, -9.0f);
 

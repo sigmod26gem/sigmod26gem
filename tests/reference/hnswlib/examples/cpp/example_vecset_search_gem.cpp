@@ -10,10 +10,10 @@
 #include <complex>
 #include <cblas.h>
 #include <chrono>  
-#include "../../hnswlib/hnswlib.h"
-#include "../../hnswlib/space_l2.h"
-#include "../../hnswlib/vectorset.h"
-#include "../../cnpy/cnpy.h"
+#include "graph/hnswlib.h"
+#include "distance/legacy_spaces.h"
+#include "graph/vectorset.h"
+#include "cnpy.h"
 // #include <experimental/filesystem>
 #define TEST_MSMARCO 0
 #define TEST_LOTTE 1

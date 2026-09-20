@@ -1,5 +1,5 @@
 #pragma once
-#include "space_l2.h"
+#include "distance/legacy_spaces.h"
 #include "space_ip.h"
 #include <assert.h>
 #include <unordered_map>

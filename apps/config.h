@@ -1,5 +1,6 @@
 #pragma once
 #include "gem/io.h"
+#include "gem/options.h"
 
 namespace gem::app {
 struct RunConfig {

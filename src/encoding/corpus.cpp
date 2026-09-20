@@ -1,4 +1,5 @@
-#include "gem/index.h"
+#include "gem/data.h"
+#include "assignment.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -38,18 +39,6 @@ void EncodedCorpus::validate() const {
     for (const auto* centers : {&fine_centroids, &graph_centroids})
         for (float x : *centers)
             if (!std::isfinite(x)) throw std::invalid_argument("non-finite centroid");
-    std::vector<bool> covered(documents.size(), false);
-    for (const auto& cluster : clusters) {
-        auto sorted = cluster;
-        std::sort(sorted.begin(), sorted.end());
-        if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end())
-            throw std::invalid_argument("duplicate document in graph cluster");
-        for (auto id : cluster) {
-            if (id >= covered.size()) throw std::invalid_argument("cluster document out of range");
-            covered[id] = true;
-        }
-    }
-    if (std::find(covered.begin(), covered.end(), false) != covered.end())
-        throw std::invalid_argument("document has no graph-cluster assignment");
+    detail::validate_assignment(clusters, documents.size());
 }
 }  // namespace gem

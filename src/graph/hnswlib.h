@@ -226,7 +226,7 @@ AlgorithmInterface<dist_t>::searchKnnCloserFirst(const void* query_data, size_t 
 }
 }  // namespace hnswlib
 
-#include "space_l2.h"
+#include "distance/legacy_spaces.h"
 #include "space_ip.h"
 #include "stop_condition.h"
 #include "bruteforce.h"

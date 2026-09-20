@@ -1,5 +1,6 @@
 #pragma once
-#include "gem/index.h"
+#include "gem/data.h"
+#include <string>
 
 namespace gem {
 struct CorpusFiles {

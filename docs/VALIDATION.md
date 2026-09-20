@@ -1,48 +1,59 @@
-# 重构验证
+# Validation
 
-## 2026-09-20
+## Runtime Refactor, 2026-09-20
 
-本次包含两个代码提交：`60a2fae` 引入 library、查询 workspace 和 INI 入口；`da2a6b9` 修复多个 graph clusters 共用入口文档时返回重复结果的问题。
+`60a2fae` introduces the library, query-owned workspaces, and INI entry. `da2a6b9` removes duplicate results caused by clusters sharing the same entry document.
 
-### 功能测试
+Functional tests compare FP32 graph and rerank scores against the original Eigen expressions with a `1e-6` tolerance. They cover qEMD codebook strides and code multiplicities; small-corpus build/repair/save/load/search; eight concurrent workers with different nprobe, ef, and rerank_k; empty clusters; duplicate entries; invalid data; memory budgets; and strict configuration parsing.
 
-- FP32 graph scorer、原始向量 MaxSim 与旧 Eigen 表达式比较，误差阈值为 `1e-6`。
-- qEMD 检查实际 codebook 步长及重复 code 的 transport 权重。
-- 小规模数据完成 build、repair、save、load 与 search。
-- 八个线程共享一个 Index，各自持有 workspace，混合使用不同 nprobe、ef 和 rerank_k，结果与逐条串行查询一致。
-- 检查空 cluster、重复入口、非法 code、容量预算、NPY 类型与形状、未知和重复 INI 字段。
-- Release native、Release portable，以及开启 AddressSanitizer/UndefinedBehaviorSanitizer 的 Debug 构建运行同一组 CTest。
+These tests passed in native Release, portable Release, and AddressSanitizer/UndefinedBehaviorSanitizer Debug builds.
 
-### EVQA 结果一致性
+### EVQA Equivalence
 
-使用作者公开的 51,462 篇文档版本和匹配的 `index1024_all_24_80/0.bin`。向量维度为 128，fine centroids 为 32,768，graph clusters 为 1,024。搜索参数为 nprobe=4、ef=4000、rerank_k=512、k=100；本次加载后未额外 repair。
+The input is the authors' public 51,462-document EVQA corpus and its matching `index1024_all_24_80/0.bin`, with dimension 128, 32,768 fine centroids, and 1,024 graph clusters. Parameters are nprobe=4, ef=4000, rerank_k=512, and k=100. No additional graph repair is run after load.
 
-选取前 128 条查询，每个入口预热一遍、测量三遍。对照入口调用旧 example 的 search，新入口调用 `Index::search`，两者共享当前分支的 HNSW 内核修复。
+The first 128 queries are run with one warmup and three measured passes. The reference invokes the original example's search method; the library invokes `Index::search`. Both use the branch's shared HNSW fixes.
 
-| 检查 | 单线程 library | 八线程 library |
+| Check | Library, 1 worker | Library, 8 workers |
 |---|---:|---:|
-| 比较的 top-100 结果数 | 12,800 | 12,800 |
-| 文档编号与排名不同的结果数 | 0 | 0 |
-| TSV 输出分数最大误差 | 0 | 0 |
-| 重复结果文档数 | 0 | 0 |
+| Top-100 results compared | 12,800 | 12,800 |
+| Document or rank mismatches | 0 | 0 |
+| Maximum TSV score difference | 0 | 0 |
+| Duplicate result documents | 0 | 0 |
 | Recall@100 | 71.0938% | 71.0938% |
 
-修复重复入口前，library 与旧入口的结果同样逐项一致，但包含 6 个重复文档结果。重复入口修复在两个入口中共同生效，修复后的排序单独完成上述比较。
+Before the shared-entry fix, both entries also matched, including six duplicate documents. The fixed version was checked separately.
 
-### 性能观察
+### Initial Performance Check
 
-结构重构的第一轮测量采用相同输入、搜索参数和 native 编译选项，三次测量的中位数如下：
+The first refactor comparison used identical inputs, search options, and native compilation. Medians of three passes were:
 
-| 入口 | 查询线程数 | QPS | 平均查询延迟 |
+| Entry | Query workers | QPS | Mean query latency |
 |---|---:|---:|---:|
-| 旧入口 | 1 | 4.43 | 225.85 ms |
-| library | 1 | 4.43 | 225.82 ms |
-| library | 8 | 29.21 | 267.91 ms |
+| Original entry | 1 | 4.43 | 225.85 ms |
+| Library | 1 | 4.43 | 225.82 ms |
+| Library | 8 | 29.21 | 267.91 ms |
 
-单线程性能基本持平。该轮对应重复入口修复前的版本；旧入口与 library 的计时边界也有少量差别。修复后的测试期间，机器上同时有另一个多线程构图任务，吞吐数字未用于前后性能比较。
+Single-worker performance was unchanged within measurement variation. These measurements precede the shared-entry fix and have slightly different timing boundaries between the original and new harnesses. A separate construction job was active during subsequent validation; those timings are excluded from performance comparisons.
 
-### 后续测试
+### Remaining Coverage
 
-当前真实数据对照覆盖 128 条查询。合并前继续运行全量 EVQA，并在空闲机器上重测最终提交的吞吐。构建目前完成小规模功能测试，尚未进行全量构图性能比较。新的 centroid cache、评分布局和 SIMD kernel 分别完成距离、排名和性能验证后，再单独提交。
+Real-data equivalence currently covers 128 queries. Full EVQA and isolated final-commit throughput measurements remain necessary before merge. Build has small-corpus functional coverage, without full-corpus build performance results. New centroid caches, scoring layouts, and SIMD kernels require separate distance, ranking, and performance comparisons.
 
-命令和数据格式见 [LIBRARY.md](LIBRARY.md)；完整配置字段见 [CONFIGURATION.md](CONFIGURATION.md)。
+Commands are in [LIBRARY.md](LIBRARY.md); configuration fields are in [CONFIGURATION.md](CONFIGURATION.md).
+
+## Module Layout Refactor, 2026-09-20
+
+The implementation is divided into encoding, build, search, distance, graph, and IO modules. Public types are split into standalone headers; `Index` retains ownership and orchestration. HNSW template methods are grouped into private implementation fragments. Expanding those fragments reproduces the preceding commit's method bodies, excluding whitespace and the C++17 inline declaration of the shared output mutex.
+
+Validation after the move:
+
+- Native Release: all three CTest tests passed.
+- Portable Debug with AddressSanitizer and UndefinedBehaviorSanitizer: all three CTest tests passed, including leak detection.
+- Portable Release: the library, `gem_run`, and the original README's example compiled through the compatibility CMake entry with `BUILD_TESTING=OFF`.
+- EVQA: the same 128-query comparison passed for the reference entry and library with one and eight workers. Each run used one warmup and three measured passes; all returned 12,800 top-100 rows with matching document IDs, ranks, and output scores. Recall@100 remained 71.0938%.
+- The library's single-worker TSV was also byte-identical to the result saved before the module move, avoiding reliance solely on the two entries sharing the relocated kernel.
+- Python assignment tests matched the original TF-IDF formula and ordering for top-r values 1, 3, and 20. Full codebook training was not rerun.
+- The root README remains byte-identical to upstream main.
+
+Real-data validation still covers 128 queries; this change does not establish full-corpus build or throughput improvements.

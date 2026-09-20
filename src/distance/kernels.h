@@ -1,5 +1,5 @@
 #pragma once
-#include "gem/index.h"
+#include "gem/data.h"
 #include <vector>
 
 namespace gem::detail {

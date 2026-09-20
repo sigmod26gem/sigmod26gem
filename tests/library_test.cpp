@@ -1,5 +1,5 @@
 #include "gem/index.h"
-#include "search/kernels.h"
+#include "distance/kernels.h"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
