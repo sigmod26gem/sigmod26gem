@@ -143,11 +143,16 @@ public:
             cluster_entries[i] = -1;
         }
         alg_hnsw_list[0] = new hnswlib::HierarchicalNSW<float>(space_ptr, base.size() + 1, M_index, EF_index);
+        const auto center_count = static_cast<size_t>(NUM_CLUSTER);
+        alg_hnsw_list[0]->fstdistfuncClusterEMD = [center_count](const vectorset* a, const vectorset* b, const float* table) {
+            return hnswlib::L2SqrVecClusterEMDSized(a, b, table, center_count);
+        };
         for(int tmpi = 0; tmpi < temp_cluster_id.size(); tmpi++) {
             int i = temp_cluster_id[tmpi];
             double cur_time = omp_get_wtime();
             std::cout << "cluster build begin: " + std::to_string(i) + " " + std::to_string(cluster_set[i].size()) << std::endl;
             alg_hnsw_list[0]->entry_map.clear();
+            if (cluster_set[i].empty()) continue;
             cluster_entries[i] = cluster_set[i][0];
             alg_hnsw_list[0]->addClusterPointEntry(&base_vectors[cluster_set[i][0]], cluster_distance.data(), cluster_set[i][0], cluster_set[i][0]);
             if (cluster_set[i].size() <= 1) {
@@ -263,6 +268,7 @@ public:
 
         for(int tmpi = 0; tmpi < temp_cluster_id.size(); tmpi++) {
             int i = temp_cluster_id[tmpi];
+            if (cluster_set[i].empty()) continue;
             cluster_entries[i] = cluster_set[i][0];
             for (int j = 0; j < cluster_set[i].size(); j++) {
                 alg_hnsw_list[0]->loadDataAddress(&base_vectors[cluster_set[i][j]], cluster_set[i][j]);
@@ -279,6 +285,7 @@ public:
     void repair_fine_graph_structure(const std::vector<std::vector<hnswlib::labeltype>>& cluster_set) {
         double time = omp_get_wtime();
         for (int i = 0; i < cluster_set.size(); i++) {
+            if (cluster_set[i].empty()) continue;
             alg_hnsw_list[0]->entry_map.clear();
             // std::cout << "cluster: " << i << std::endl;
             if (i % 10000 == 0) {
@@ -1060,19 +1067,12 @@ int main() {
     std::vector<std::vector<int>> qrels;
     std::vector<std::vector<int>> train_qrels;
 
-    train_query_data.resize((long long) 808731 * 128 * 32);
     // load_msmarco_train_query(train_query_data, train_query, train_qrels);
 
     bool rebuild = false;
     bool save_result = false;
 
     std::string index_file, save_result_file;
-
-    std::vector<int> temp_cluster_id(NUM_GRAPH_CLUSTER);
-    for (int i = 0;i < NUM_GRAPH_CLUSTER; i++) {
-        temp_cluster_id[i] = i;
-    }
-    std::cout << temp_cluster_id.size() << std::endl;
 
     if (dataset == 0) {
         NUM_BASE_SETS = NUM_BASE_SETS_MS;
@@ -1146,6 +1146,8 @@ int main() {
         index_file = "../../example_index/evqaIndex" + std::to_string(NUM_GRAPH_CLUSTER_EVQA) + "_all_" + std::to_string(M_index) + "_" + std::to_string(EF_index) + "/";
         save_result_file = "../../example_index/evqa_results_" + std::to_string(NUM_GRAPH_CLUSTER_EVQA) + "_all_" + std::to_string(M_index) + "_" + std::to_string(EF_index) + "_" + std::to_string(K) + ".txt";
     }
+    std::vector<int> temp_cluster_id(NUM_GRAPH_CLUSTER);
+    std::iota(temp_cluster_id.begin(), temp_cluster_id.end(), 0);
     std::remove(save_result_file.c_str());
     std::vector<float> col_query_cluster_scores(NUM_CLUSTER * QUERY_VECTOR_COUNT);
     test_query_cluster_scores.resize(NUM_CLUSTER * QUERY_VECTOR_COUNT);

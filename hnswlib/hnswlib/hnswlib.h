@@ -8,9 +8,7 @@
   #define HNSWERR HNSWLIB_ERR_OVERRIDE
 #endif
 
-#define __SSE__
-#define __AVX__
-// #define __AVX512F__
+// ISA macros are supplied by the compiler, not assumed by the library.
 
 #ifndef NO_MANUAL_VECTORIZATION
 #if (defined(__SSE__) || _M_IX86_FP > 0 || defined(_M_AMD64) || defined(_M_X64))

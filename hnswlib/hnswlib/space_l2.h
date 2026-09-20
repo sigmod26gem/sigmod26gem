@@ -1020,7 +1020,8 @@ static float L2SqrVecChamfer(const vectorset* q, const vectorset* p, int level) 
 }
 
 
-static float L2SqrVecClusterEMD(const vectorset* q, const vectorset* p, const float* cluster_dis) {
+static float L2SqrVecClusterEMDSized(const vectorset* q, const vectorset* p,
+                                   const float* cluster_dis, size_t center_count) {
     float sum1 = 0.0f;
     float sum2 = 0.0f;
     // level = 0;
@@ -1033,7 +1034,7 @@ static float L2SqrVecClusterEMD(const vectorset* q, const vectorset* p, const fl
 
     // #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < n; ++i) {
-        long long icode = (long long)q->codes[i] * NUM_CLUSTER_CALC;
+        long long icode = (long long)q->codes[i] * center_count;
         // std::cout << i << " " << icode << " "  << std::flush;
         for (size_t j = 0; j < m; ++j) {
             dist_flat[i * m + j] = (double)1.0f - cluster_dis[icode + p->codes[j]];
@@ -1047,6 +1048,10 @@ static float L2SqrVecClusterEMD(const vectorset* q, const vectorset* p, const fl
     float emd = EMD_wrap_self(n, m, a_hist.data(), b_hist.data(), dist_flat.data(), 1000);
     // std::cout<< emd << std::endl;
     return emd;
+}
+
+static float L2SqrVecClusterEMD(const vectorset* q, const vectorset* p, const float* cluster_dis) {
+    return L2SqrVecClusterEMDSized(q, p, cluster_dis, NUM_CLUSTER_CALC);
 }
 
 static float L2SqrVecClusterChamfer(const vectorset* q, const vectorset* p, const float* cluster_dis) {
@@ -1233,6 +1238,7 @@ static float L2SqrCluster4Search(const vectorset* q, const vectorset* p, int lev
     return sum1 / q->vecnum;
 }
 
+#if defined(USE_AVX512)
 static float L2SqrClusterAVX4Search(const vectorset* q, const vectorset* p, int level) {
     // l2_sqr_call_count.fetch_add(1, std::memory_order_relaxed);
     // l2_vec_call_count.fetch_add(1, std::memory_order_relaxed);
@@ -1270,6 +1276,7 @@ static float L2SqrClusterAVX4Search(const vectorset* q, const vectorset* p, int 
     return 1.0f - sum1 / q->vecnum;
 }
 
+#endif
 static float L2SqrVecSet4Search(const vectorset* q, const vectorset* p, int level) {
     float sum1 = 0.0f;
     float sum2 = 0.0f;

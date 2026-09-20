@@ -76,7 +76,7 @@ for di in tqdm(range(len(doc_lens))):
     
 for i in range(cluster_num):
     if i not in new_cluster2doc:
-        new_cluster2doc[i] = [new_cluster2doc[i]]
+        new_cluster2doc[i] = []
 print(len(new_cluster2doc))
 
 

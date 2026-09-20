@@ -10,6 +10,7 @@
 #include <list>
 #include <memory>
 #include <set>
+#include <functional>
 namespace hnswlib {
 typedef unsigned int tableint;
 typedef unsigned int linklistsizeint;
@@ -151,7 +152,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     float (*fstdistfunc4search_)(const vectorset*, const vectorset*, int level) ;
     float (*fstdistfuncCF)(const vectorset*, const vectorset*, int level) ;
     float (*fstdistfuncEMD)(const vectorset*, const vectorset*, int level) ;
-    float (*fstdistfuncClusterEMD)(const vectorset*, const vectorset*, const float*) ;
+    std::function<float(const vectorset*, const vectorset*, const float*)> fstdistfuncClusterEMD;
     float (*fstdistfuncMap_)(const vectorset* , const vectorset* , const vectorset* , const uint8_t* , const uint8_t* , uint8_t* , int level);
     float (*fstdistfuncMapCalc_)(const vectorset* , const vectorset* , const vectorset* , const uint8_t* , const uint8_t* , std::vector<std::vector<float>>&, int level);
     float (*fstdistfuncInit_)(const vectorset* , const vectorset* , uint8_t* , int level);
@@ -1548,7 +1549,8 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         const void *data_point,
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
-        BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
+        BaseSearchStopCondition<dist_t>* stop_condition = nullptr,
+        const std::vector<bool>* query_mask = nullptr) const {
         VisitedList *vl = visited_list_pool_->getFreeVisitedList();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
@@ -1559,7 +1561,7 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         std::vector<std::priority_queue<std::pair<dist_t, tableint>, std::vector<std::pair<dist_t, tableint>>, CompareByFirst>> candidate_set_list(entry_points.size());
         std::vector<bool> stop_flag_list(entry_points.size());
         // std::vector<dist_t> lower_bound_list(entry_points.size());
-        dist_t lowerBound;
+        dist_t lowerBound = std::numeric_limits<dist_t>::lowest();
         for (int i = 0; i < entry_points.size(); i++) {
             labeltype ep = entry_points[i];
             tableint ep_id = label_lookup_.find(ep)->second;
@@ -1621,7 +1623,7 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
                         _mm_prefetch(data_level0_memory_ + (*(data + j + 1)) * size_data_per_element_ + offsetData_,
                                         _MM_HINT_T0);  ////////////
         #endif
-                        if (!search_set[candidate_id]) {
+                        if (!(query_mask ? (*query_mask)[candidate_id] : search_set[candidate_id])) {
                             continue;
                         }
                         if (!(visited_array[candidate_id] == visited_array_tag)) {
@@ -3357,6 +3359,7 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
 
     void saveIndex(const std::string &location) {
         std::ofstream output(location, std::ios::binary);
+        if (!output) throw std::runtime_error("Cannot create graph file: " + location);
         std::streampos position;
 
         writeBinaryPOD(output, offsetLevel0_);
@@ -3383,6 +3386,7 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
                 output.write(linkLists_[i], linkListSize);
         }
         output.close();
+        if (!output) throw std::runtime_error("Cannot write graph file: " + location);
     }
 
 
@@ -4752,7 +4756,10 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
 
 
     std::priority_queue<std::pair<dist_t, labeltype >>
-    searchKnnClusterEntries(const void *query_data, size_t k, const std::vector<labeltype>& entry_points, BaseFilterFunctor* isIdAllowed = nullptr)  {
+    searchKnnClusterEntries(const void *query_data, size_t k, const std::vector<labeltype>& entry_points,
+                            BaseFilterFunctor* isIdAllowed = nullptr,
+                            const std::vector<bool>* query_mask = nullptr,
+                            size_t query_ef = 0) const {
         std::priority_queue<std::pair<dist_t, labeltype >> result;
         if (cur_element_count == 0) return result;
 
@@ -4760,10 +4767,10 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         bool bare_bone_search = !num_deleted_ && !isIdAllowed;
         if (bare_bone_search) {
             top_candidates = searchBaseLayerClusterEntriesMulti<true>(
-                entry_points, query_data, std::max(ef_, k), isIdAllowed);
+                entry_points, query_data, std::max(query_ef ? query_ef : ef_, k), isIdAllowed, nullptr, query_mask);
         } else {
             top_candidates = searchBaseLayerClusterEntriesMulti<false>(
-                entry_points, query_data, std::max(ef_, k), isIdAllowed);
+                entry_points, query_data, std::max(query_ef ? query_ef : ef_, k), isIdAllowed, nullptr, query_mask);
         }
         // if (bare_bone_search) {
         //     top_candidates = searchBaseLayerClusterEntries<true>(
