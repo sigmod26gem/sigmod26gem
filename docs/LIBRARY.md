@@ -69,3 +69,5 @@ python3 tests/compare_evqa.py /absolute/path/to/build /absolute/path/to/evqa /ab
 最后一个数字是查询数，0 表示全部查询。其后可增加匹配该 corpus 的图文件路径；默认使用仓库自带的图。注意仓库图包含 51,472 篇文档，另一份公开 EVQA 数据包含 51,462 篇，必须使用对应版本的图。脚本按顺序测试旧入口、新入口单线程和八线程，各预热一遍、测量三遍；逐项比较 top-k 文档编号、排名和分数。对照入口固定 nprobe=4、128 维、单查询线程。未执行原 example 的 main，也不加载其训练查询。
 
 基准 QPS 为整个查询批次的吞吐，mean_ms 为单条查询执行时间的平均值，两者均排除数据加载。输出结果保存在指定目录，INI 和 JSON 汇总一起保留。
+
+已完成的测试和结果见 [VALIDATION.md](VALIDATION.md)。
