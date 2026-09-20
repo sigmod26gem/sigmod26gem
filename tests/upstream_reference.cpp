@@ -1,7 +1,7 @@
 // Run the upstream search expression and traversal on the same input and graph.
 // The example's main is never executed; the test harness supplies configuration.
 #define main gem_upstream_example_main
-#include "reference/hnswlib/examples/cpp/example_vecset_search_gem.cpp"
+#include "reference/gem_example.cpp"
 #undef main
 #include "config.h"
 #include "gem/io.h"

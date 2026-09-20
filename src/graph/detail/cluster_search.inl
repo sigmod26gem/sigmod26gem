@@ -6,7 +6,8 @@
         const float *cluster_distance,
         size_t ef) {
         int layer = 0;
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        auto visited_lease = visited_list_pool_->acquire();
+        VisitedList* vl = visited_lease.get();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 
@@ -91,7 +92,6 @@
                 }
             }
         }
-        visited_list_pool_->releaseVisitedList(vl);
 
         return top_candidates;
     }
@@ -105,7 +105,8 @@
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        auto visited_lease = visited_list_pool_->acquire();
+        VisitedList* vl = visited_lease.get();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
         // std::cout << bare_bone_search << std::endl;
@@ -232,7 +233,6 @@
             }
         }
 
-        visited_list_pool_->releaseVisitedList(vl);
         // std::cout << top_candidates.size() << std::endl;
         return top_candidates;
     }
@@ -245,7 +245,8 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        auto visited_lease = visited_list_pool_->acquire();
+        VisitedList* vl = visited_lease.get();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 
@@ -368,7 +369,6 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
             }
         }
 
-        visited_list_pool_->releaseVisitedList(vl);
         // std::cout << top_candidates.size() << std::endl;
         return top_candidates;
     }
@@ -383,7 +383,8 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        auto visited_lease = visited_list_pool_->acquire();
+        VisitedList* vl = visited_lease.get();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 
@@ -505,7 +506,6 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
             // std::cout << std::endl;
         }
 
-        visited_list_pool_->releaseVisitedList(vl);
         // std::cout << top_candidates.size() << std::endl;
         return top_candidates;
     }

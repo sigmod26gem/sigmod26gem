@@ -3,6 +3,7 @@
 #include <mutex>
 #include <string.h>
 #include <deque>
+#include <memory>
 
 namespace hnswlib {
 typedef unsigned short int vl_type;
@@ -41,30 +42,49 @@ class VisitedListPool {
     int numelements;
 
  public:
+    struct ReturnToPool {
+        VisitedListPool* pool;
+        void operator()(VisitedList* list) const noexcept { pool->releaseVisitedList(list); }
+    };
+    using Lease = std::unique_ptr<VisitedList, ReturnToPool>;
+
     VisitedListPool(int initmaxpools, int numelements1) {
         numelements = numelements1;
-        for (int i = 0; i < initmaxpools; i++)
-            pool.push_front(new VisitedList(numelements));
+        try {
+            for (int i = 0; i < initmaxpools; i++) {
+                auto list = std::make_unique<VisitedList>(numelements);
+                pool.push_front(list.get());
+                list.release();
+            }
+        } catch (...) {
+            for (auto* list : pool) delete list;
+            throw;
+        }
     }
 
+    Lease acquire() { return Lease(getFreeVisitedList(), ReturnToPool{this}); }
+
     VisitedList *getFreeVisitedList() {
-        VisitedList *rez;
+        VisitedList *rez = nullptr;
         {
             std::unique_lock <std::mutex> lock(poolguard);
             if (pool.size() > 0) {
                 rez = pool.front();
                 pool.pop_front();
-            } else {
-                rez = new VisitedList(numelements);
             }
         }
+        if (!rez) rez = new VisitedList(numelements);
         rez->reset();
         return rez;
     }
 
-    void releaseVisitedList(VisitedList *vl) {
-        std::unique_lock <std::mutex> lock(poolguard);
-        pool.push_front(vl);
+    void releaseVisitedList(VisitedList *vl) noexcept {
+        try {
+            std::unique_lock <std::mutex> lock(poolguard);
+            pool.push_front(vl);
+        } catch (...) {
+            delete vl;
+        }
     }
 
     ~VisitedListPool() {

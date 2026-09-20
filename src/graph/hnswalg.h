@@ -1,6 +1,7 @@
 #pragma once
 
 #include "visited_list_pool.h"
+#include "search_scratch.h"
 #include "hnswlib.h"
 #include <atomic>
 #include <random>
@@ -206,6 +207,7 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
             link_list_locks_(max_elements),
             element_levels_(max_elements),
             allow_replace_deleted_(allow_replace_deleted) {
+        try {
         max_elements_ = max_elements;
         num_deleted_ = 0;
         //data_size_ = s->get_data_size();
@@ -269,6 +271,10 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
         // size_links_level0_ = maxM0_ * (sizeof(tableint) + 240 * sizeof(uint8_t)) + sizeof(linklistsizeint);
         mult_ = 1 / log(1.0 * M_);
         revSize_ = 1.0 / mult_;
+        } catch (...) {
+            clear();
+            throw;
+        }
     }
 
 
@@ -279,23 +285,22 @@ class HierarchicalNSW : public AlgorithmInterface<dist_t> {
     void clear() {
         free(data_level0_memory_);
         data_level0_memory_ = nullptr;
-        for (tableint i = 0; i < cur_element_count; i++) {
+        for (size_t i = 0; linkLists_ && i < element_levels_.size(); i++) {
             if (element_levels_[i] > 0)
                 free(linkLists_[i]);
         }
         free(linkLists_);
         linkLists_ = nullptr;
         cur_element_count = 0;
+        num_deleted_ = 0;
+        label_lookup_.clear();
+        deleted_elements.clear();
+        element_levels_.clear();
         visited_list_pool_.reset(nullptr);
     }
 
 
-    struct CompareByFirst {
-        constexpr bool operator()(std::pair<dist_t, tableint> const& a,
-            std::pair<dist_t, tableint> const& b) const noexcept {
-            return a.first < b.first;
-        }
-    };
+    using CompareByFirst = CompareDistance<dist_t>;
 
     struct CompareByFirstFirst {
         constexpr bool operator()(std::pair<std::pair<dist_t, dist_t>, tableint> const& a,

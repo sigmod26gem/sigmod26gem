@@ -1,6 +1,7 @@
 #pragma once
 #include "gem/data.h"
 #include "gem/options.h"
+#include "search_scratch.h"
 #include <memory>
 #include <string>
 #include <utility>
@@ -16,7 +17,8 @@ class Graph {
     void traverse(float* scores, std::size_t centers, std::size_t query_tokens,
                   float* maxima, std::size_t ef,
                   const std::vector<std::size_t>& entries, const std::vector<bool>& allowed,
-                  std::vector<std::pair<float, std::size_t>>& candidates) const;
+                  std::vector<std::pair<float, std::size_t>>& candidates,
+                  hnswlib::EntrySearchScratch<float>& scratch) const;
     std::size_t capacity() const;
     const std::vector<std::vector<std::size_t>>& clusters() const;
     ~Graph();

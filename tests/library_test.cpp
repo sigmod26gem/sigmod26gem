@@ -33,7 +33,7 @@ gem::EncodedCorpus corpus() {
     c.clusters.resize(3);  // Include an empty cluster.
     for (std::size_t id = 0; id < 48; ++id) {
         for (std::size_t t = 0; t < 1 + id % 5; ++t) {
-            const int code = (id * 3 + t) % 24;
+            const int code = (id * 3 + t / 2) % 24;  // Repeated codes retain qEMD mass.
             c.codes.push_back(code);
             c.documents.values.insert(c.documents.values.end(), c.fine_centroids.begin() + code * 8,
                                        c.fine_centroids.begin() + (code + 1) * 8);
@@ -58,6 +58,9 @@ void kernels() {
         const float expected = (1.0f - maxima.array()).sum() / n;
         check(std::abs(expected - gem::detail::code_distance(table.data(), n, 24,
                      codes.data(), codes.size(), scratch.data())) < 1e-6f, "graph scorer mismatch");
+        const std::vector<int> unique = {3, 20, 0, 23, 12};
+        check(expected == gem::detail::code_distance(table.data(), n, 24,
+                     unique.data(), unique.size(), scratch.data()), "code dedup changed MaxSim");
     }
     auto c = corpus();
     std::vector<float> scratch;

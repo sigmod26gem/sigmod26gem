@@ -65,7 +65,7 @@ RunConfig read_config(const std::string& filename) {
         throw std::runtime_error("run.action must be build, search or repair");
     for (const auto& key : {"data.vectors", "data.lengths", "data.codes", "data.fine_centroids", "data.graph_centroids", "data.clusters", "index.path"})
         if (strings.at(key)->empty()) throw std::runtime_error(std::string("missing key: ") + key);
-    if (!c.data.shards || !c.workers || !c.inner_threads || !c.repeats || c.workers > INT32_MAX || c.inner_threads > INT32_MAX)
+    if (!c.data.shards || !c.workers || !c.inner_threads || !c.repeats || c.workers > INT32_MAX || c.inner_threads > INT32_MAX || c.warmup > SIZE_MAX - c.repeats)
         throw std::runtime_error("invalid shard, worker, thread or repetition count");
     if (c.action == "search" && c.query_vectors.empty()) throw std::runtime_error("query.vectors is required");
     if (c.action == "repair" && (c.index_output.empty() || c.index_output == c.index))

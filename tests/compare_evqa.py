@@ -2,9 +2,33 @@
 import configparser
 import csv
 import json
+import math
 from pathlib import Path
 import subprocess
 import sys
+
+
+def compare_rows(actual, reference):
+    if not reference or len(actual) != len(reference):
+        raise RuntimeError("empty results or result count differs")
+    max_error = 0.0
+    seen = set()
+    for a, b in zip(actual, reference):
+        if len(a) != 4 or len(b) != 4:
+            raise RuntimeError("result rows require four columns")
+        if a[:3] != b[:3]:
+            raise RuntimeError(f"query/rank/doc mismatch: {a} vs {b}")
+        scores = float(a[3]), float(b[3])
+        if not all(math.isfinite(score) for score in scores):
+            raise RuntimeError("non-finite result score")
+        max_error = max(max_error, abs(scores[0] - scores[1]))
+        key = (a[0], a[2])
+        if key in seen:
+            raise RuntimeError(f"duplicate result document: {key}")
+        seen.add(key)
+    if max_error > 1e-6:
+        raise RuntimeError(f"score error {max_error}")
+    return {"rows": len(actual), "max_score_error": max_error}
 
 
 def main():
@@ -45,21 +69,7 @@ def main():
     for name in ("library_w1", "library_w8"):
         with (output / f"{name}.tsv").open() as file:
             actual = list(csv.reader(file, delimiter="\t"))
-        if len(actual) != len(reference):
-            raise RuntimeError(f"{name}: result count differs")
-        max_error = 0.0
-        seen = set()
-        for a, b in zip(actual, reference):
-            if a[:3] != b[:3]:
-                raise RuntimeError(f"{name}: query/rank/doc mismatch: {a} vs {b}")
-            max_error = max(max_error, abs(float(a[3]) - float(b[3])))
-            key = (a[0], a[2])
-            if key in seen:
-                raise RuntimeError(f"{name}: duplicate result document: {key}")
-            seen.add(key)
-        if max_error > 1e-6:
-            raise RuntimeError(f"{name}: score error {max_error}")
-        reports[name + "_equivalence"] = {"rows": len(actual), "max_score_error": max_error}
+        reports[name + "_equivalence"] = compare_rows(actual, reference)
     (output / "summary.json").write_text(json.dumps(reports, indent=2) + "\n")
     print("Equivalent document IDs/ranks; scores within 1e-6.", flush=True)
 

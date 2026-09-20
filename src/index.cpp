@@ -40,7 +40,7 @@ void Index::search(VectorSetView query, const SearchOptions& options,
     detail::score_fine_centers(query, corpus, scratch);
     impl_->graph->traverse(scratch.fine_scores.data(), corpus.fine_centroids.size() / query.dimension,
                            query.count, scratch.maxima.data(), options.ef,
-                           scratch.entries, scratch.allowed, scratch.candidates);
+                           scratch.entries, scratch.allowed, scratch.candidates, scratch.traversal);
     detail::rerank_candidates(query, corpus, options, scratch, results);
 }
 }  // namespace gem

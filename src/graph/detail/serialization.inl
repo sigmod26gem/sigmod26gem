@@ -83,7 +83,7 @@
     }
 
 
-    void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, size_t max_elements_i = 0) {
+    void loadIndex(const std::string &location, SpaceInterface<dist_t> *s, size_t max_elements_i = 0) try {
         std::ifstream input(location, std::ios::binary);
 
         if (!input.is_open())
@@ -99,9 +99,10 @@
         readBinaryPOD(input, max_elements_);
         readBinaryPOD(input, cur_element_count);
 
-        size_t max_elements = max_elements_i;
-        if (max_elements < cur_element_count)
-            max_elements = max_elements_;
+        if (!cur_element_count || cur_element_count > max_elements_ || cur_element_count > INT32_MAX)
+            throw std::runtime_error("Invalid graph element count");
+        size_t max_elements = std::max(max_elements_i, cur_element_count.load());
+        if (max_elements > INT32_MAX) throw std::runtime_error("Graph capacity exceeds int32");
         max_elements_ = max_elements;
         readBinaryPOD(input, size_data_per_element_);
         readBinaryPOD(input, label_offset_);
@@ -114,6 +115,19 @@
         readBinaryPOD(input, M_);
         readBinaryPOD(input, mult_);
         readBinaryPOD(input, ef_construction_);
+
+        // GEM's cluster-only build leaves the global HNSW entry unset.
+        const bool cluster_only = maxlevel_ == 0 && enterpoint_node_ == std::numeric_limits<tableint>::max();
+        if (M_ < 2 || M_ > 10000 || maxM_ != M_ || maxM0_ != 2 * M_ ||
+            !std::isfinite(mult_) || mult_ <= 0 || ef_construction_ < M_ ||
+            (!cluster_only && (maxlevel_ < 0 || enterpoint_node_ >= cur_element_count)))
+            throw std::runtime_error("Invalid graph header");
+        size_links_per_element_ = size_links_level0_ = maxM0_ * sizeof(tableint) + sizeof(linklistsizeint);
+        if (offsetLevel0_ != 0 || offsetData_ != size_links_level0_ ||
+            label_offset_ != offsetData_ + sizeof(vectorset) ||
+            size_data_per_element_ != label_offset_ + sizeof(labeltype) ||
+            max_elements > std::numeric_limits<size_t>::max() / size_data_per_element_)
+            throw std::runtime_error("Invalid graph record layout");
 
         // data_size_ = s->get_data_size();
         data_size_ = sizeof(vectorset);
@@ -132,6 +146,10 @@
         dist_func_param_ = s->get_dist_func_param();
 
         auto pos = input.tellg();
+        const auto base_bytes = cur_element_count * size_data_per_element_;
+        if (total_filesize < pos || base_bytes > static_cast<size_t>(total_filesize - pos) ||
+            cur_element_count > (static_cast<size_t>(total_filesize - pos) - base_bytes) / sizeof(unsigned int))
+            throw std::runtime_error("Truncated graph records");
 
         /// Optional - check if index is ok:
         input.seekg(cur_element_count * size_data_per_element_, input.cur);
@@ -142,6 +160,10 @@
 
             unsigned int linkListSize;
             readBinaryPOD(input, linkListSize);
+            if (linkListSize % size_links_per_element_ != 0 ||
+                linkListSize / size_links_per_element_ > static_cast<size_t>(std::max(0, maxlevel_)) ||
+                input.tellg() > total_filesize || linkListSize > static_cast<size_t>(total_filesize - input.tellg()))
+                throw std::runtime_error("Invalid graph upper layer size");
             if (linkListSize != 0) {
                 input.seekg(linkListSize, input.cur);
             }
@@ -159,7 +181,20 @@
         data_level0_memory_ = (char *) malloc(max_elements * size_data_per_element_);
         if (data_level0_memory_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate level0");
-        input.read(data_level0_memory_, cur_element_count * size_data_per_element_);
+        if (!input.read(data_level0_memory_, base_bytes)) throw std::runtime_error("Truncated graph data");
+
+        auto validate_links = [&](const char* record) {
+            unsigned short degree;
+            std::memcpy(&degree, record, sizeof(degree));
+            if (degree > maxM0_) throw std::runtime_error("Invalid graph degree");
+            for (size_t j = 0; j < degree; ++j) {
+                tableint neighbor;
+                std::memcpy(&neighbor, record + sizeof(linklistsizeint) + j * sizeof(tableint), sizeof(neighbor));
+                if (neighbor >= cur_element_count) throw std::runtime_error("Graph neighbor outside element range");
+            }
+        };
+        for (size_t i = 0; i < cur_element_count; ++i)
+            validate_links(data_level0_memory_ + i * size_data_per_element_);
 
         // 修改这里
         size_links_per_element_ = maxM0_ * (sizeof(tableint) + fineEdgeSize * sizeof(uint8_t))  + sizeof(linklistsizeint);
@@ -170,7 +205,7 @@
 
         visited_list_pool_.reset(new VisitedListPool(1, max_elements));
 
-        linkLists_ = (char **) malloc(sizeof(void *) * max_elements);
+        linkLists_ = (char **) calloc(max_elements, sizeof(void *));
         if (linkLists_ == nullptr)
             throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklists");
         element_levels_ = std::vector<int>(max_elements);
@@ -178,7 +213,8 @@
         revSize_ = 1.0 / mult_;
         ef_ = 80;
         for (size_t i = 0; i < cur_element_count; i++) {
-            label_lookup_[getExternalLabel(i)] = i;
+            if (!label_lookup_.emplace(getExternalLabel(i), i).second)
+                throw std::runtime_error("Duplicate graph label");
             unsigned int linkListSize;
             readBinaryPOD(input, linkListSize);
             if (linkListSize == 0) {
@@ -189,9 +225,21 @@
                 linkLists_[i] = (char *) malloc(linkListSize);
                 if (linkLists_[i] == nullptr)
                     throw std::runtime_error("Not enough memory: loadIndex failed to allocate linklist");
-                input.read(linkLists_[i], linkListSize);
+                if (!input.read(linkLists_[i], linkListSize)) throw std::runtime_error("Truncated graph upper layer");
+                for (size_t offset = 0; offset < linkListSize; offset += size_links_per_element_)
+                    validate_links(linkLists_[i] + offset);
             }
         }
+
+        if (!cluster_only && element_levels_[enterpoint_node_] != maxlevel_)
+            throw std::runtime_error("Graph entry level mismatch");
+        for (size_t i = 0; i < cur_element_count; ++i)
+            for (int level = 1; level <= element_levels_[i]; ++level) {
+                auto* links = reinterpret_cast<linklistsizeint*>(linkLists_[i] + (level - 1) * size_links_per_element_);
+                for (size_t j = 0; j < getListCount(links); ++j)
+                    if (element_levels_[reinterpret_cast<tableint*>(links + 1)[j]] < level)
+                        throw std::runtime_error("Graph neighbor has no requested upper layer");
+            }
 
         for (size_t i = 0; i < cur_element_count; i++) {
             if (isMarkedDeleted(i)) {
@@ -203,4 +251,7 @@
         input.close();
 
         return;
+    } catch (...) {
+        clear();
+        throw;
     }

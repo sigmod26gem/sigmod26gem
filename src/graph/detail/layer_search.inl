@@ -126,7 +126,8 @@
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        auto visited_lease = visited_list_pool_->acquire();
+        VisitedList* vl = visited_lease.get();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
         uint8_t* mapEP = (uint8_t*)malloc(fineEdgeSize);
@@ -314,7 +315,6 @@
             // std::cout << " free" << std::endl;
         }
 
-        visited_list_pool_->releaseVisitedList(vl);
         // std::cout << top_candidates.size() << std::endl;
         return top_candidates;
     }
@@ -329,7 +329,8 @@
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        auto visited_lease = visited_list_pool_->acquire();
+        VisitedList* vl = visited_lease.get();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
         uint8_t* mapEP = (uint8_t*)malloc(fineEdgeSize);
@@ -515,7 +516,6 @@
             // std::cout << " free" << std::endl;
         }
 
-        visited_list_pool_->releaseVisitedList(vl);
         // std::cout << top_candidates.size() << std::endl;
         return top_candidates;
     }
@@ -531,7 +531,8 @@
         size_t ef,
         BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr) const {
-        VisitedList *vl = visited_list_pool_->getFreeVisitedList();
+        auto visited_lease = visited_list_pool_->acquire();
+        VisitedList* vl = visited_lease.get();
         vl_type *visited_array = vl->mass;
         vl_type visited_array_tag = vl->curV;
 
@@ -655,7 +656,6 @@
             }
         }
 
-        visited_list_pool_->releaseVisitedList(vl);
         // std::cout << top_candidates.size() << std::endl;
         return top_candidates;
     }

@@ -4,7 +4,6 @@
 #include <cstring>
 #include <fstream>
 #include <limits>
-#include <regex>
 #include <sstream>
 #include <stdexcept>
 
@@ -12,23 +11,9 @@ namespace gem {
 namespace {
 struct Array { cnpy::NpyArray data; std::string dtype; };
 Array read(const std::string& path) {
-    std::ifstream in(path, std::ios::binary);
-    unsigned char prefix[8]{};
-    if (!in.read(reinterpret_cast<char*>(prefix), 8) || std::memcmp(prefix, "\x93NUMPY", 6))
-        throw std::runtime_error("invalid NPY file: " + path);
-    if (prefix[6] != 1) throw std::runtime_error("NPY v1 required: " + path);
-    unsigned char length[2]{};
-    in.read(reinterpret_cast<char*>(length), 2);
-    std::string header(std::size_t(length[0]) | (std::size_t(length[1]) << 8), '\0');
-    if (!in.read(header.data(), header.size())) throw std::runtime_error("truncated NPY header: " + path);
-    std::smatch match;
-    if (!std::regex_search(header, match, std::regex("['\"]descr['\"]\\s*:\\s*['\"]([^'\"]+)['\"]")))
-        throw std::runtime_error("missing NPY dtype: " + path);
-    const std::string dtype = match[1];
-    if (dtype.empty() || dtype[0] != '<')
-        throw std::runtime_error("little-endian numeric NPY required: " + path);
     auto array = cnpy::npy_load(path);
     if (array.fortran_order) throw std::runtime_error("row-major NPY required: " + path);
+    const auto dtype = array.dtype;
     return {std::move(array), dtype};
 }
 
@@ -43,6 +28,7 @@ float half(std::uint16_t x) {
 void floats(const Array& a, std::vector<float>& out) {
     if (a.dtype != "<f2" && a.dtype != "<f4") throw std::runtime_error("expected FP16 or FP32 NPY");
     const auto offset = out.size();
+    if (a.data.num_vals > out.max_size() - offset) throw std::overflow_error("vector data too large");
     out.resize(offset + a.data.num_vals);
     if (a.dtype == "<f4") {
         if (a.data.num_vals) std::memcpy(out.data() + offset, a.data.data<float>(), a.data.num_bytes());
@@ -144,7 +130,7 @@ EncodedCorpus load_corpus(const CorpusFiles& files) {
         }
         if (!row.eof()) throw std::runtime_error("invalid cluster document id");
     }
-    result.validate();
+    if (in.bad()) throw std::runtime_error("cannot read cluster file: " + files.clusters);
     return result;
 }
 }  // namespace gem

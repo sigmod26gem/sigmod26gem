@@ -1,10 +1,12 @@
 #include "benchmark.h"
 #include <atomic>
 #include <chrono>
+#include <charconv>
 #include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <sstream>
@@ -15,6 +17,8 @@ namespace gem::app {
 using Clock = std::chrono::steady_clock;
 void benchmark(const Index& index, const MultiVectors& queries, const RunConfig& c) {
     const auto count = c.limit ? std::min(c.limit, queries.size()) : queries.size();
+    if (!count || !c.workers || !c.repeats || c.warmup > std::numeric_limits<std::size_t>::max() - c.repeats)
+        throw std::invalid_argument("invalid query, worker or repetition count");
     std::vector<QueryWorkspace> workspaces(c.workers);
     std::vector<std::vector<Result>> results(count);
     std::vector<double> elapsed(count);
@@ -25,11 +29,19 @@ void benchmark(const Index& index, const MultiVectors& queries, const RunConfig&
         std::string line;
         while (std::getline(in, line)) {
             std::istringstream row(line);
-            std::size_t q, d;
-            std::string extra;
-            if (!(row >> q >> d) || (row >> extra)) throw std::runtime_error("qrels require two columns: query_id document_id");
+            std::string qtext, dtext, extra;
+            if (!(row >> qtext >> dtext) || (row >> extra)) throw std::runtime_error("qrels require two columns: query_id document_id");
+            auto id = [](const std::string& text, std::size_t bound) {
+                std::size_t value = 0;
+                const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+                if (parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size() || value >= bound)
+                    throw std::runtime_error("qrels id outside query/corpus range: " + text);
+                return value;
+            };
+            const auto q = id(qtext, queries.size()), d = id(dtext, index.size());
             if (q < count) qrels[q].insert(d);
         }
+        if (in.bad()) throw std::runtime_error("cannot read qrels: " + c.qrels);
     }
     for (std::size_t repeat = 0; repeat < c.warmup + c.repeats; ++repeat) {
         std::atomic<std::size_t> next{0};
@@ -87,6 +99,8 @@ void benchmark(const Index& index, const MultiVectors& queries, const RunConfig&
         for (std::size_t q = 0; q < count; ++q)
             for (std::size_t rank = 0; rank < results[q].size(); ++rank)
                 out << q << '\t' << rank << '\t' << results[q][rank].id << '\t' << results[q][rank].distance << '\n';
+        out.close();
+        if (!out) throw std::runtime_error("cannot write results: " + c.output);
     }
 }
 }  // namespace gem::app

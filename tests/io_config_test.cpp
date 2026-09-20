@@ -40,6 +40,8 @@ int main() {
             write(valid + suffix);
             rejects([&] { gem::app::read_config((root / "test.ini").string()); });
         }
+        write(valid + "[benchmark]\nwarmup=" + std::to_string(SIZE_MAX) + "\nrepeats=1\n");
+        rejects([&] { gem::app::read_config((root / "test.ini").string()); });
         std::filesystem::remove_all(root);
         std::cout << "NPY dtype/shape/offsets and strict INI tests passed\n";
         return 0;
