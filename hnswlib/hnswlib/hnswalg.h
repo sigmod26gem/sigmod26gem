@@ -1565,6 +1565,10 @@ template <bool bare_bone_search = true, bool collect_metrics = false>
         for (int i = 0; i < entry_points.size(); i++) {
             labeltype ep = entry_points[i];
             tableint ep_id = label_lookup_.find(ep)->second;
+            if (visited_array[ep_id] == visited_array_tag) {
+                stop_flag_list[i] = true;
+                continue;
+            }
             char* ep_data = getDataByInternalId(ep_id);
             dist_t dist = fstdistfuncCluster((vectorset*)data_point, (vectorset*)ep_data, 0);
             lowerBound = std::max(lowerBound, dist);

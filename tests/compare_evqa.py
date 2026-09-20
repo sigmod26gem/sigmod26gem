@@ -48,10 +48,15 @@ def main():
         if len(actual) != len(reference):
             raise RuntimeError(f"{name}: result count differs")
         max_error = 0.0
+        seen = set()
         for a, b in zip(actual, reference):
             if a[:3] != b[:3]:
                 raise RuntimeError(f"{name}: query/rank/doc mismatch: {a} vs {b}")
             max_error = max(max_error, abs(float(a[3]) - float(b[3])))
+            key = (a[0], a[2])
+            if key in seen:
+                raise RuntimeError(f"{name}: duplicate result document: {key}")
+            seen.add(key)
         if max_error > 1e-6:
             raise RuntimeError(f"{name}: score error {max_error}")
         reports[name + "_equivalence"] = {"rows": len(actual), "max_score_error": max_error}

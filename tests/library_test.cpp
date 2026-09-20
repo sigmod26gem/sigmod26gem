@@ -41,6 +41,7 @@ gem::EncodedCorpus corpus() {
         c.documents.offsets.push_back(c.codes.size());
         c.clusters[id % 2].push_back(id);
     }
+    c.clusters[1].insert(c.clusters[1].begin(), 0);  // Two clusters share an entry.
     return c;
 }
 
@@ -108,6 +109,10 @@ int main() {
             index.search(input.documents.at(i), options, w1, expected[i]);
             loaded.search(input.documents.at(i), options, w2, actual);
             check(equal(actual, expected[i]), "save/load mismatch");
+            std::vector<std::size_t> ids;
+            for (auto result : actual) ids.push_back(result.id);
+            std::sort(ids.begin(), ids.end());
+            check(std::adjacent_find(ids.begin(), ids.end()) == ids.end(), "duplicate result document");
         }
         std::vector<gem::SearchOptions> variants(3, options);
         variants[0].nprobe = 1;

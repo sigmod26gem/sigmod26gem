@@ -66,7 +66,9 @@ void benchmark(const Index& index, const MultiVectors& queries, const RunConfig&
         for (std::size_t q = 0; q < count; ++q) {
             if (qrels[q].empty()) continue;
             std::size_t hits = 0;
-            for (const auto& result : results[q]) hits += qrels[q].count(result.id);
+            std::unordered_set<std::size_t> returned;
+            for (const auto& result : results[q])
+                if (returned.insert(result.id).second) hits += qrels[q].count(result.id);
             recall += double(hits) / qrels[q].size();
             ++labeled;
         }
