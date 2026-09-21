@@ -1,6 +1,7 @@
 #pragma once
 #include "index.h"
 #include "hnswlib.h"
+#include "distance/kernels.h"
 
 namespace gem::detail {
 struct ScoreQuery : vectorset {
@@ -13,6 +14,10 @@ struct ScoreQuery : vectorset {
                const char* records, std::size_t stride, const std::size_t* offsets, const int* codes)
         : vectorset(scores, nullptr, centers, tokens), maxima(scratch), graph_records(records),
           record_stride(stride), code_offsets(offsets), unique_codes(codes) {}
+    float score_internal(std::size_t id) const {
+        const auto begin = code_offsets[id], end = code_offsets[id + 1];
+        return code_distance(data, vecnum, dim, unique_codes + begin, end - begin, maxima);
+    }
 };
 
 struct Graph::Impl {

@@ -22,7 +22,7 @@ add_library(gem STATIC
     src/encoding/corpus.cpp src/encoding/assignment.cpp
     src/build/cluster_graph.cpp src/build/finalize.cpp
     src/search/routing.cpp src/search/traversal.cpp src/search/rerank.cpp src/search/workspace.cpp
-    src/distance/dot_table.cpp src/distance/maxsim.cpp src/distance/qemd.cpp
+    src/distance/dot_table.cpp src/distance/maxsim.cpp src/distance/rerank.cpp src/distance/qemd.cpp
     src/graph/index.cpp
     src/io/numpy.cpp src/io/graph_index.cpp)
 add_library(gem::gem ALIAS gem)
@@ -44,6 +44,24 @@ target_include_directories(gem_run PRIVATE ${CBLAS_INCLUDE_DIR})
 target_link_libraries(gem_run PRIVATE gem::gem gem_app_config OpenMP::OpenMP_CXX ${OPENBLAS_LIBRARY})
 
 if(BUILD_TESTING)
+    add_executable(gem_search_scratch_tests tests/search_scratch_test.cpp)
+    target_compile_features(gem_search_scratch_tests PRIVATE cxx_std_17)
+    target_include_directories(gem_search_scratch_tests PRIVATE src)
+    add_test(NAME gem_search_scratch COMMAND gem_search_scratch_tests)
+    add_executable(gem_routing_tests tests/routing_test.cpp)
+    target_include_directories(gem_routing_tests PRIVATE src)
+    target_link_libraries(gem_routing_tests PRIVATE gem::gem)
+    add_test(NAME gem_routing COMMAND gem_routing_tests)
+    set_tests_properties(gem_routing PROPERTIES ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1")
+    add_executable(gem_distance_tests tests/distance_test.cpp)
+    target_include_directories(gem_distance_tests PRIVATE src)
+    target_link_libraries(gem_distance_tests PRIVATE gem::gem Eigen3::Eigen)
+    target_compile_definitions(gem_distance_tests PRIVATE EIGEN_DONT_PARALLELIZE)
+    if(GEM_NATIVE_ARCH)
+        target_compile_options(gem_distance_tests PRIVATE -march=native)
+    endif()
+    add_test(NAME gem_distance COMMAND gem_distance_tests)
+    set_tests_properties(gem_distance PROPERTIES ENVIRONMENT "OPENBLAS_NUM_THREADS=1;OMP_NUM_THREADS=1")
     add_executable(gem_robustness_tests tests/robustness_test.cpp apps/benchmark.cpp)
     target_include_directories(gem_robustness_tests PRIVATE src)
     target_link_libraries(gem_robustness_tests PRIVATE gem::gem gem_app_config gem_cnpy Threads::Threads)

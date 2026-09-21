@@ -63,14 +63,15 @@ void kernels() {
                      unique.data(), unique.size(), scratch.data()), "code dedup changed MaxSim");
     }
     auto c = corpus();
-    std::vector<float> scratch;
+    gem::detail::RerankWorkspace scratch;
     for (std::size_t i = 0; i < 48; ++i) {
         auto a = c.documents.at(i), b = c.documents.at(47 - i);
         using Row = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
         Eigen::Map<const Row> am(a.data, a.count, a.dimension), bm(b.data, b.count, b.dimension);
         Eigen::MatrixXf scores = am * bm.transpose();
         const float expected = 1 - scores.rowwise().maxCoeff().sum() / a.count;
-        check(std::abs(expected - gem::detail::rerank_distance(a, b, scratch)) < 1e-6f,
+        gem::detail::prepare_rerank_query(a, scratch);
+        check(std::abs(expected - gem::detail::rerank_distance(b, scratch)) < 1e-6f,
               "rerank scorer mismatch");
     }
     const float center_scores[] = {1, 0, 0, 1};

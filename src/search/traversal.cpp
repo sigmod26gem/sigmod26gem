@@ -1,4 +1,6 @@
 #include "graph/index_impl.h"
+#include <algorithm>
+#include <functional>
 
 namespace gem::detail {
 void Graph::traverse(float* scores, std::size_t centers, std::size_t query_tokens,
@@ -10,21 +12,17 @@ void Graph::traverse(float* scores, std::size_t centers, std::size_t query_token
     ScoreQuery query(scores, centers, query_tokens, maxima,
                      graph.data_level0_memory_, graph.size_data_per_element_,
                      impl_->unique_code_offsets.data(), impl_->unique_codes.data());
+    const auto score = [&query](hnswlib::tableint id) { return query.score_internal(id); };
     if (graph.num_deleted_)
-        graph.searchBaseLayerClusterEntriesInto<false>(entries, &query, ef, scratch, nullptr, nullptr, &allowed);
+        graph.searchBaseLayerClusterEntriesScored<false>(entries, ef, scratch, score, nullptr, nullptr, &allowed);
     else
-        graph.searchBaseLayerClusterEntriesInto<true>(entries, &query, ef, scratch, nullptr, nullptr, &allowed);
-    // Keep GEM's two heap orderings, including its equal-score tie behavior.
-    auto& found = scratch.results;
-    while (!scratch.top.empty()) {
-        const auto result = scratch.top.top();
-        found.emplace(result.first, graph.getExternalLabel(result.second));
-        scratch.top.pop();
-    }
+        graph.searchBaseLayerClusterEntriesScored<true>(entries, ef, scratch, score, nullptr, nullptr, &allowed);
+    // Match the old external-label max-heap order, including equal scores.
     candidates.clear();
-    while (!found.empty()) {
-        candidates.push_back(found.top());
-        found.pop();
-    }
+    candidates.reserve(scratch.top.size());
+    for (const auto& result : scratch.top.values())
+        candidates.emplace_back(result.first, graph.getExternalLabel(result.second));
+    scratch.top.clear();
+    std::sort(candidates.begin(), candidates.end(), std::greater<>());
 }
 }  // namespace gem::detail

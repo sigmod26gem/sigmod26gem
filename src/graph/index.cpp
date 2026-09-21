@@ -8,8 +8,7 @@ namespace {
 float score_document(const vectorset* query, const vectorset* doc, int) {
     const auto& q = static_cast<const ScoreQuery&>(*query);
     const auto id = static_cast<std::size_t>(reinterpret_cast<const char*>(doc) - q.graph_records) / q.record_stride;
-    const auto begin = q.code_offsets[id], end = q.code_offsets[id + 1];
-    return code_distance(q.data, q.vecnum, q.dim, q.unique_codes + begin, end - begin, q.maxima);
+    return q.score_internal(id);
 }
 }  // namespace
 

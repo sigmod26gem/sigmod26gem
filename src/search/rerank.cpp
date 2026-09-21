@@ -10,9 +10,10 @@ void rerank_candidates(VectorSetView query, const EncodedCorpus& corpus, const S
                       [](auto a, auto b) { return a.first < b.first; });
     results.clear();
     results.reserve(count);
+    if (count) prepare_rerank_query(query, w.rerank);
     for (std::size_t i = 0; i < count; ++i) {
         const auto id = w.candidates[i].second;
-        results.push_back({id, rerank_distance(query, corpus.documents.at(id), w.pair_scores)});
+        results.push_back({id, rerank_distance(corpus.documents.at(id), w.rerank)});
     }
     std::sort(results.begin(), results.end(), [](auto a, auto b) { return a.distance < b.distance; });
     if (results.size() > options.k) results.resize(options.k);

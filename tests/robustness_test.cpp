@@ -165,10 +165,9 @@ void workspace() {
     scratch.reset(10, 3);
     check(scratch.frontiers[0].empty() && scratch.frontiers[0].capacity() == capacity,
           "frontier allocation was discarded between queries");
-    scratch.visited[0] = 1;
-    scratch.generation = std::numeric_limits<std::uint16_t>::max();
+    scratch.visited.test_and_set(0);
     scratch.reset(10, 1);
-    check(scratch.generation == 1 && scratch.visited[0] == 0, "visited generation wraparound");
+    check(!scratch.visited.contains(0), "visited bits retained between queries");
 }
 }  // namespace
 

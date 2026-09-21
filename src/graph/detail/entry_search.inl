@@ -20,9 +20,23 @@
         EntrySearchScratch<dist_t>& scratch, BaseFilterFunctor* isIdAllowed = nullptr,
         BaseSearchStopCondition<dist_t>* stop_condition = nullptr,
         const std::vector<bool>* query_mask = nullptr) const {
+        const auto score = [this, data_point](tableint id) {
+            return fstdistfuncCluster(static_cast<const vectorset*>(data_point),
+                                     reinterpret_cast<const vectorset*>(getDataByInternalId(id)), 0);
+        };
+        searchBaseLayerClusterEntriesScored<bare_bone_search, collect_metrics>(
+            entry_points, ef, scratch, score, isIdAllowed, stop_condition, query_mask);
+    }
+
+    template <bool bare_bone_search = true, bool collect_metrics = false, class Score>
+    void searchBaseLayerClusterEntriesScored(
+        const std::vector<labeltype>& entry_points, size_t ef,
+        EntrySearchScratch<dist_t>& scratch, const Score& score,
+        BaseFilterFunctor* isIdAllowed = nullptr,
+        BaseSearchStopCondition<dist_t>* stop_condition = nullptr,
+        const std::vector<bool>* query_mask = nullptr) const {
         scratch.reset(max_elements_, entry_points.size());
-        auto* visited_array = scratch.visited.data();
-        const auto visited_array_tag = scratch.generation;
+        const auto* visited_words = scratch.visited.data();
         auto& top_candidates = scratch.top;
         auto& candidate_set_list = scratch.frontiers;
         auto& stop_flag_list = scratch.stopped;
@@ -31,17 +45,16 @@
         for (int i = 0; i < entry_points.size(); i++) {
             labeltype ep = entry_points[i];
             tableint ep_id = label_lookup_.at(ep);
-            if (visited_array[ep_id] == visited_array_tag) {
+            if (scratch.visited.contains(ep_id)) {
                 stop_flag_list[i] = true;
                 continue;
             }
-            char* ep_data = getDataByInternalId(ep_id);
-            dist_t dist = fstdistfuncCluster((vectorset*)data_point, (vectorset*)ep_data, 0);
+            dist_t dist = score(ep_id);
             lowerBound = std::max(lowerBound, dist);
             // lower_bound_list[i] = std::max(lower_bound_list[i], dist);
             top_candidates.emplace(dist, ep_id);
             candidate_set_list[i].emplace(-dist, ep_id);
-            visited_array[ep_id] = visited_array_tag;
+            scratch.visited.test_and_set(ep_id);
             stop_flag_list[i] = false;
         }
         bool all_empty = false;
@@ -80,7 +93,7 @@
 
         #ifdef USE_SSE
                     if (size) {
-                        _mm_prefetch((char *) (visited_array + *(data + 1)), _MM_HINT_T0);
+                        _mm_prefetch((const char*) (visited_words + (*(data + 1) / 64)), _MM_HINT_T0);
                         _mm_prefetch(data_level0_memory_ + (*(data + 1)) * size_data_per_element_ + offsetData_, _MM_HINT_T0);
                     }
                     _mm_prefetch((char *) (data + 2), _MM_HINT_T0);
@@ -91,19 +104,16 @@
         //                    if (candidate_id == 0) continue;
         #ifdef USE_SSE
                         if (j < size) {
-                            _mm_prefetch((char *) (visited_array + *(data + j + 1)), _MM_HINT_T0);
+                            _mm_prefetch((const char*) (visited_words + (*(data + j + 1) / 64)), _MM_HINT_T0);
                             _mm_prefetch(data_level0_memory_ + (*(data + j + 1)) * size_data_per_element_ + offsetData_, _MM_HINT_T0);
                         }
         #endif
                         if (!(query_mask ? (*query_mask)[candidate_id] : search_set[candidate_id])) {
                             continue;
                         }
-                        if (!(visited_array[candidate_id] == visited_array_tag)) {
-                            visited_array[candidate_id] = visited_array_tag;
+                        if (!scratch.visited.test_and_set(candidate_id)) {
 
-                            char *currObj1 = (getDataByInternalId(candidate_id));
-                            // dist_t dist = fstdistfunc_((vectorset*)data_point, (vectorset*)currObj1);
-                            dist_t dist = fstdistfuncCluster((vectorset*)data_point, (vectorset*)currObj1, 0);
+                            dist_t dist = score(candidate_id);
                             // std::cout << getExternalLabel(candidate_id) << "(" << dist << ") ";
                             bool flag_consider_candidate;
                             if (!bare_bone_search && stop_condition) {
@@ -125,7 +135,7 @@
                                     (!isMarkedDeleted(candidate_id) && ((!isIdAllowed) || (*isIdAllowed)(getExternalLabel(candidate_id))))) {
                                         top_candidates.emplace(dist, candidate_id);
                                     if (!bare_bone_search && stop_condition) {
-                                        stop_condition->add_point_to_result(getExternalLabel(candidate_id), currObj1, dist);
+                                        stop_condition->add_point_to_result(getExternalLabel(candidate_id), getDataByInternalId(candidate_id), dist);
                                     }
                                 }
 
