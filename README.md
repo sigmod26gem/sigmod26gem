@@ -210,3 +210,7 @@ python/        Coarse clustering and document assignment
 configs/       Example configurations
 tests/         Unit tests and reference comparisons
 ```
+
+## Acknowledgements
+
+Special thanks to [@xzwj1699](https://github.com/xzwj1699) for their valuable contributions to improving the code quality and enhancing this repository.
